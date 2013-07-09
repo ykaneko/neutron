@@ -17,6 +17,7 @@ import uuid
 
 from oslo.config import cfg
 
+from neutron.common import legacy
 from neutron.openstack.common import context
 from neutron.openstack.common.gettextutils import _
 from neutron.openstack.common import importutils
@@ -41,6 +42,7 @@ notifier_opts = [
 
 CONF = cfg.CONF
 CONF.register_opts(notifier_opts)
+legacy.modernize_quantum_config(CONF)
 
 WARN = 'WARN'
 INFO = 'INFO'
