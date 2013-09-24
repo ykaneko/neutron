@@ -35,6 +35,7 @@ migration_for_plugins = [
     'neutron.plugins.nicira.NeutronPlugin.NvpPluginV2',
     'neutron.plugins.nec.nec_plugin.NECPluginV2',
     'neutron.plugins.brocade.NeutronPlugin.BrocadePluginV2',
+    'neutron.plugins.ryu.ryu_neutron_plugin.RyuNeutronPluginV2',
 ]
 
 from alembic import op

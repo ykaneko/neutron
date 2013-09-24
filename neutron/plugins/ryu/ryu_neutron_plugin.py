@@ -21,21 +21,27 @@ from ryu.app import client
 from ryu.app import rest_nw_id
 
 from neutron.agent import securitygroups_rpc as sg_rpc
+from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
+from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.common import constants as q_const
 from neutron.common import exceptions as q_exc
 from neutron.common import rpc as q_rpc
 from neutron.common import topics
+from neutron.db import agents_db
+from neutron.db import agentschedulers_db
 from neutron.db import api as db
 from neutron.db import db_base_plugin_v2
 from neutron.db import dhcp_rpc_base
 from neutron.db import external_net_db
 from neutron.db import extraroute_db
+from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_gwmode_db
 from neutron.db import l3_rpc_base
 from neutron.db import models_v2
 from neutron.db import portbindings_base
 from neutron.db import securitygroups_rpc_base as sg_db_rpc
 from neutron.extensions import portbindings
+from neutron.openstack.common import importutils
 from neutron.openstack.common import log as logging
 from neutron.openstack.common import rpc
 from neutron.openstack.common.rpc import proxy
@@ -57,7 +63,8 @@ class RyuRpcCallbacks(dhcp_rpc_base.DhcpRpcCallbackMixin,
         self.ofp_rest_api_addr = ofp_rest_api_addr
 
     def create_rpc_dispatcher(self):
-        return q_rpc.PluginRpcDispatcher([self])
+        return q_rpc.PluginRpcDispatcher([self,
+                                          agents_db.AgentExtRpcCallback()])
 
     def get_ofp_rest_api(self, context, **kwargs):
         LOG.debug(_("get_ofp_rest_api: %s"), self.ofp_rest_api_addr)
@@ -94,11 +101,14 @@ class RyuNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
                          extraroute_db.ExtraRoute_db_mixin,
                          l3_gwmode_db.L3_NAT_db_mixin,
                          sg_db_rpc.SecurityGroupServerRpcMixin,
-                         portbindings_base.PortBindingBaseMixin):
+                         portbindings_base.PortBindingBaseMixin,
+                         l3_agentschedulers_db.L3AgentSchedulerDbMixin,
+                         agentschedulers_db.DhcpAgentSchedulerDbMixin):
 
     _supported_extension_aliases = ["external-net", "router", "ext-gw-mode",
                                     "extraroute", "security-group",
-                                    "binding"]
+                                    "binding", "agent", "l3_agent_scheduler",
+                                    "dhcp_agent_scheduler"]
 
     @property
     def supported_extension_aliases(self):
@@ -129,6 +139,12 @@ class RyuNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
             if nw_id != rest_nw_id.NW_ID_UNKNOWN:
                 self.client.update_network(nw_id)
         self._setup_rpc()
+        self.network_scheduler = importutils.import_object(
+            cfg.CONF.network_scheduler_driver
+        )
+        self.router_scheduler = importutils.import_object(
+            cfg.CONF.router_scheduler_driver
+        )
 
         # register known all network list on startup
         self._create_all_tenant_network()
@@ -138,6 +154,13 @@ class RyuNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
                                svc_constants.L3_ROUTER_NAT: topics.L3PLUGIN}
         self.conn = rpc.create_connection(new=True)
         self.notifier = AgentNotifierApi(topics.AGENT)
+        self.agent_notifiers[q_const.AGENT_TYPE_DHCP] = (
+            dhcp_rpc_agent_api.DhcpAgentNotifyAPI()
+        )
+        self.agent_notifiers[q_const.AGENT_TYPE_L3] = (
+            l3_rpc_agent_api.L3AgentNotify
+        )
+
         self.callbacks = RyuRpcCallbacks(self.ofp_api_host)
         self.dispatcher = self.callbacks.create_rpc_dispatcher()
         for svc_topic in self.service_topics.values():

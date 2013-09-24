@@ -18,9 +18,12 @@ from neutron.tests.unit.ryu import fake_ryu
 from neutron.tests.unit import test_db_plugin as test_plugin
 
 
+PLUGIN_NAME = 'neutron.plugins.ryu.ryu_neutron_plugin.RyuNeutronPluginV2'
+
+
 class RyuPluginV2TestCase(test_plugin.NeutronDbPluginV2TestCase):
 
-    _plugin_name = 'neutron.plugins.ryu.ryu_neutron_plugin.RyuNeutronPluginV2'
+    _plugin_name = PLUGIN_NAME
 
     def setUp(self):
         self.ryu_patcher = fake_ryu.patch_fake_ryu_client()

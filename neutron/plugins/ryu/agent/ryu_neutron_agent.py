@@ -37,11 +37,13 @@ from neutron.agent.linux.ovs_lib import VifPort
 from neutron.agent import rpc as agent_rpc
 from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.common import config as logging_config
+from neutron.common import constants as q_const
 from neutron.common import exceptions as q_exc
 from neutron.common import topics
 from neutron import context as q_context
 from neutron.extensions import securitygroup as ext_sg
 from neutron.openstack.common import log
+from neutron.openstack.common import loopingcall
 from neutron.openstack.common.rpc import dispatcher
 from neutron.plugins.ryu.common import config  # noqa
 
@@ -189,6 +191,13 @@ class OVSNeutronOFPRyuAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin):
                  polling_interval, root_helper):
         super(OVSNeutronOFPRyuAgent, self).__init__()
         self.polling_interval = polling_interval
+        self.agent_state = {
+            'binary': 'neutron-ryu-agent',
+            'host': cfg.CONF.host,
+            'topic': q_const.L2_AGENT_TOPIC,
+            'configurations': {},
+            'agent_type': q_const.AGENT_TYPE_RYU,
+            'start_flag': True}
         self._setup_rpc()
         self.sg_agent = RyuSecurityGroupAgent(self.context,
                                               self.plugin_rpc,
@@ -196,9 +205,22 @@ class OVSNeutronOFPRyuAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin):
         self._setup_integration_br(root_helper, integ_br, tunnel_ip,
                                    ovsdb_port, ovsdb_ip)
 
+    def _report_state(self):
+        try:
+            # How many devices are likely used by a VM
+            ports = self.int_br.get_vif_port_set()
+            num_devices = len(ports)
+            self.agent_state.get('configurations')['devices'] = num_devices
+            self.state_rpc.report_state(self.context,
+                                        self.agent_state)
+            self.agent_state.pop('start_flag', None)
+        except Exception:
+            LOG.exception(_("Failed reporting state!"))
+
     def _setup_rpc(self):
         self.topic = topics.AGENT
         self.plugin_rpc = RyuPluginApi(topics.PLUGIN)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
         self.context = q_context.get_admin_context_without_session()
         self.dispatcher = self._create_rpc_dispatcher()
         consumers = [[topics.PORT, topics.UPDATE],
@@ -206,6 +228,12 @@ class OVSNeutronOFPRyuAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin):
         self.connection = agent_rpc.create_consumers(self.dispatcher,
                                                      self.topic,
                                                      consumers)
+
+        report_interval = cfg.CONF.AGENT.report_interval
+        if report_interval:
+            heartbeat = loopingcall.FixedIntervalLoopingCall(
+                self._report_state)
+            heartbeat.start(interval=report_interval)
 
     def _create_rpc_dispatcher(self):
         return dispatcher.RpcDispatcher([self])
